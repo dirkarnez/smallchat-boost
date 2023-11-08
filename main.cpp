@@ -54,3 +54,54 @@ std::unique_ptr<char[]> chatRealloc(std::unique_ptr<char[]> ptr, size_t size) {
     }
     return ptr;
 }
+
+#include <boost/asio.hpp>
+#include <vector>
+#include <memory>
+#include <string>
+
+using boost::asio::ip::tcp;
+
+struct Client {
+    std::string nick;
+    tcp::socket socket;
+
+    Client(boost::asio::io_service& io_service, std::string nick)
+        : socket(io_service), nick(std::move(nick)) {}
+};
+
+class Chat {
+public:
+    Chat(boost::asio::io_service& io_service, short port)
+        : acceptor_(io_service, tcp::endpoint(tcp::v4(), port)) {
+        do_accept();
+    }
+
+    void sendMsgToAllClientsBut(int excluded, const std::string& msg) {
+        for (auto& client : clients_) {
+            if (client->socket.native_handle() == excluded) continue;
+            boost::asio::write(client->socket, boost::asio::buffer(msg));
+        }
+    }
+
+private:
+    void do_accept() {
+        acceptor_.async_accept(
+            [this](boost::system::error_code ec, tcp::socket socket) {
+                if (!ec) {
+                    std::string nick = "user:" + std::to_string(socket.native_handle());
+                    clients_.push_back(std::make_shared<Client>(std::move(socket), nick));
+                }
+                do_accept();
+            });
+    }
+
+    tcp::acceptor acceptor_;
+    std::vector<std::shared_ptr<Client>> clients_;
+};
+
+int main() {
+    boost::asio::io_service io_service;
+    Chat chat(io_service, 12345);
+    io_service.run();
+}
